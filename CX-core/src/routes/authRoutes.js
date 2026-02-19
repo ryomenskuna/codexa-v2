@@ -1,17 +1,42 @@
 import express from "express";
+import { body, validationResult } from "express-validator";
 import { register } from "../controllers/authController.js";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
-import pool from "../db.js" // adjust if db config path is different
+import pool from "../db.js"; // adjust if db config path is different
+import { sendError } from "../utils/http.js";
 
 const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return sendError(res, 400, "Validation failed", "VALIDATION_ERROR");
+  }
+  return next();
+};
+
 // Manual register (already present)
-router.post("/register", register);
+router.post(
+  "/register",
+  [
+    body("user_name").trim().isLength({ min: 3 }).withMessage("Username is required"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("password")
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters long"),
+  ],
+  handleValidationErrors,
+  register
+);
 
 // ✅ New: Google login/signup
-router.post("/google", async (req, res) => {
+router.post(
+  "/google",
+  [body("token").isString().notEmpty().withMessage("Token is required")],
+  handleValidationErrors,
+  async (req, res) => {
   try {
     const { token } = req.body;
 
@@ -26,7 +51,12 @@ router.post("/google", async (req, res) => {
 
     // Allow only @juetguna.in domain
     if (!email.endsWith("@juetguna.in")) {
-      return res.status(403).json({ message: "Only @juetguna.in emails allowed" });
+      return sendError(
+        res,
+        403,
+        "Only @juetguna.in emails allowed",
+        "FORBIDDEN_DOMAIN"
+      );
     }
 
     // Check if user exists
@@ -59,7 +89,7 @@ router.post("/google", async (req, res) => {
     });
   } catch (err) {
     console.error("Google login error:", err);
-    res.status(500).json({ message: "Google authentication failed" });
+    return sendError(res, 500, "Google authentication failed");
   }
 });
 

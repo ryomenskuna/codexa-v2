@@ -2,7 +2,7 @@ import React, { useEffect, useState, useContext } from "react";
 import Navbar from "../components/navbar";
 import { UserContext } from "../context/userContext";
 import { Link, useNavigate } from "react-router-dom";
-import axios from "axios";
+import { apiClient } from "../api/client";
 
 export default function QuizzesPage() {
   const { user } = useContext(UserContext);
@@ -21,8 +21,7 @@ export default function QuizzesPage() {
   useEffect(() => {
     const fetchQuizzes = async () => {
       try {
-        const res = await axios.get("http://localhost:4000/quiz/quizzes");
-        const quizzesData = res.data;
+        const quizzesData = await apiClient.get("/quiz/quizzes");
 
         const now = new Date();
         const categorized = { ongoing: [], upcoming: [], past: [] };
@@ -43,10 +42,10 @@ export default function QuizzesPage() {
           const res2 = await Promise.all(
             quizzesData.map(async (q) => {
               try {
-                const result = await axios.get(
-                  `http://localhost:4000/quiz/quizzes/${q.id}/results`
+                const result = await apiClient.get(
+                  `/quiz/quizzes/${q.id}/results`
                 );
-                const submitted = result.data.some(
+                const submitted = result.some(
                   (r) => r.user_id === user.user_id
                 );
                 return { quizId: q.id, submitted };
@@ -61,7 +60,7 @@ export default function QuizzesPage() {
         }
       } catch (err) {
         console.error(err);
-        setError("Failed to load quizzes");
+        setError(err.message || "Failed to load quizzes");
       } finally {
         setLoading(false);
       }
@@ -71,15 +70,14 @@ export default function QuizzesPage() {
   }, [user]);
 
   const handleJoinQuiz = async (quizId) => {
-    if (!user) return alert("Please login first!");
+    if (!user) {
+      return alert("Please login first!");
+    }
 
     try {
-      const res = await axios.post(
-        `http://localhost:4000/quiz/quizzes/${quizId}/check`,
-        { user_id: user.user_id }
-      );
+      const res = await apiClient.post(`/quiz/quizzes/${quizId}/check`, {});
 
-      if (res.data.registered) {
+      if (res.registered) {
         navigate(`/quiz/${quizId}/attempt`);
       } else {
         navigate(`/quiz/${quizId}/register`);
@@ -95,12 +93,12 @@ export default function QuizzesPage() {
   };
 
   return (
-    <div className="bg-[#0D111A] p-2">
+    <div className="bg-[#0D111A] p-2 text-white">
       <div className="min-h-screen bg-[#070B13] rounded-lg shadow-black shadow-md">
         <Navbar />
-        <div className="bg-[#070B13] px-10">
+        <div className="bg-[#070B13] px-4 md:px-10 pb-10">
           {/* --- Top Cards --- */}
-          <div className="flex flex-col md:flex-row justify-evenly items-center p-4">
+          <div className="flex flex-col md:flex-row justify-evenly items-center p-4 gap-4">
             {[1, 2].map((i) => (
               <div
                 key={i}

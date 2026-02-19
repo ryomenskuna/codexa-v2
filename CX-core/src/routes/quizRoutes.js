@@ -1,12 +1,37 @@
 import express from "express";
+import { body, validationResult } from "express-validator";
 import pool from "../db.js";
+import { verifyUser } from "../middleware/auth.js";
+import { verifyTeacher } from "../middleware/verifyTeacher.js";
+import { sendError } from "../utils/http.js";
 
 const router = express.Router();
 
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return sendError(res, 400, "Validation failed", "VALIDATION_ERROR");
+  }
+  return next();
+};
+
 // -------------------------------------------------------
-// CREATE QUIZ
+// CREATE QUIZ (teacher only)
 // -------------------------------------------------------
-router.post("/quizzes", async (req, res) => {
+router.post(
+  "/quizzes",
+  verifyTeacher,
+  [
+    body("name").trim().isLength({ min: 3 }).withMessage("Name is required"),
+    body("description")
+      .trim()
+      .isLength({ min: 10 })
+      .withMessage("Description is required"),
+    body("start_time").isISO8601().withMessage("Valid start_time is required"),
+    body("end_time").isISO8601().withMessage("Valid end_time is required"),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
   const {
     name,
     description,
@@ -36,20 +61,21 @@ router.post("/quizzes", async (req, res) => {
     res.json({ message: "Quiz created", quiz: result.rows[0] });
   } catch (err) {
     console.error("Create quiz error:", err);
-    res.status(500).json({ message: "Error creating quiz" });
+    return sendError(res, 500, "Error creating quiz");
   }
-});
+}
+);
 
-// REGISTER for a quiz (for upcoming quizzes)
-router.post("/quizzes/:id/register", async (req, res) => {
+// REGISTER for a quiz (for upcoming quizzes) - authenticated users
+router.post("/quizzes/:id/register", verifyUser, async (req, res) => {
   const quizId = parseInt(req.params.id, 10);
-  const { user_id } = req.body;
+  const userId = req.user.user_id;
 
   try {
     // Check if already registered
     const check = await pool.query(
       `SELECT * FROM quiz_participants WHERE quiz_id = $1 AND user_id = $2`,
-      [quizId, user_id]
+      [quizId, userId]
     );
 
     if (check.rows.length > 0) {
@@ -59,20 +85,31 @@ router.post("/quizzes/:id/register", async (req, res) => {
     // Register new participant
     await pool.query(
       `INSERT INTO quiz_participants (quiz_id, user_id) VALUES ($1, $2)`,
-      [quizId, user_id]
+      [quizId, userId]
     );
 
     return res.json({ registered: true, message: "Registration successful" });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: "Error registering for quiz" });
+    return sendError(res, 500, "Error registering for quiz");
   }
 });
 
 // -------------------------------------------------------
-// ADD QUESTION
+// ADD QUESTION (teacher only)
 // -------------------------------------------------------
-router.post("/quizzes/:quizId/questions", async (req, res) => {
+router.post(
+  "/quizzes/:quizId/questions",
+  verifyTeacher,
+  [
+    body("question").trim().isLength({ min: 5 }).withMessage("Question is required"),
+    body("marks").isNumeric().withMessage("Marks must be a number"),
+    body("options")
+      .isArray({ min: 2, max: 4 })
+      .withMessage("Options must be an array of 2-4 items"),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
   const { quizId } = req.params;
   const { question, marks, options } = req.body;
 
@@ -83,6 +120,10 @@ router.post("/quizzes/:quizId/questions", async (req, res) => {
 
   const correct_index = options.findIndex((o) => o.isCorrect);
   const correct_answer = ["A", "B", "C", "D"][correct_index];
+
+  if (correct_index === -1 || !correct_answer) {
+    return sendError(res, 400, "At least one correct option is required");
+  }
 
   try {
     const result = await pool.query(
@@ -104,14 +145,15 @@ router.post("/quizzes/:quizId/questions", async (req, res) => {
     res.json({ message: "Question added", question: result.rows[0] });
   } catch (err) {
     console.error("Add question error:", err);
-    res.status(500).json({ message: "Error adding question" });
+    return sendError(res, 500, "Error adding question");
   }
-});
+}
+);
 
 // -------------------------------------------------------
-// PUBLISH QUIZ
+// PUBLISH QUIZ (teacher only)
 // -------------------------------------------------------
-router.post("/quizzes/:quizId/publish", async (req, res) => {
+router.post("/quizzes/:quizId/publish", verifyTeacher, async (req, res) => {
   const { quizId } = req.params;
   try {
     await pool.query(`UPDATE quizzes SET is_published = TRUE WHERE id = $1`, [
@@ -120,7 +162,7 @@ router.post("/quizzes/:quizId/publish", async (req, res) => {
     res.json({ message: "Quiz published successfully" });
   } catch (err) {
     console.error("Publish quiz error:", err);
-    res.status(500).json({ message: "Error publishing quiz" });
+    return sendError(res, 500, "Error publishing quiz");
   }
 });
 
@@ -138,22 +180,22 @@ router.get("/quizzes", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Fetch quizzes error:", err);
-    res.status(500).json({ message: "Error fetching quizzes" });
+    return sendError(res, 500, "Error fetching quizzes");
   }
 });
 
 // -------------------------------------------------------
-// JOIN / REGISTER FOR QUIZ
+// JOIN / REGISTER FOR QUIZ (check registration) - authenticated users
 // -------------------------------------------------------
-router.post("/quizzes/:id/join", async (req, res) => {
+router.post("/quizzes/:id/join", verifyUser, async (req, res) => {
   const quizId = req.params.id;
-  const { user_id } = req.body;
+  const userId = req.user.user_id;
 
   try {
     // Check if user already registered
     const reg = await pool.query(
       `SELECT * FROM quiz_participants WHERE quiz_id = $1 AND user_id = $2`,
-      [quizId, user_id]
+      [quizId, userId]
     );
 
     if (reg.rows.length === 0) {
@@ -168,14 +210,14 @@ router.post("/quizzes/:id/join", async (req, res) => {
   }
 });
 
-router.post("/quizzes/:id/check", async (req, res) => {
+router.post("/quizzes/:id/check", verifyUser, async (req, res) => {
   const quizId = parseInt(req.params.id, 10);
-  const { user_id } = req.body;
+  const userId = req.user.user_id;
 
   try {
     const result = await pool.query(
       "SELECT * FROM quiz_participants WHERE quiz_id = $1 AND user_id = $2",
-      [quizId, user_id]
+      [quizId, userId]
     );
 
     res.json({ registered: result.rows.length > 0 });
@@ -214,7 +256,7 @@ router.get("/quizzes/:id/status", async (req, res) => {
     return res.json({ status: "ONGOING" });
   } catch (err) {
     console.error("Status check error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return sendError(res, 500, "Server error");
   }
 });
 
@@ -238,7 +280,7 @@ router.get("/quizzes/:quizId/attempt", async (req, res) => {
     });
   } catch (err) {
     console.error("Error loading attempt questions:", err);
-    return res.status(500).json({ message: "Server error" });
+    return sendError(res, 500, "Server error");
   }
 });
 
@@ -252,7 +294,7 @@ router.get("/quizzes/:id", async (req, res) => {
     );
 
     if (quizRes.rows.length === 0) {
-      return res.status(404).json({ message: "Quiz not found" });
+      return sendError(res, 404, "Quiz not found");
     }
 
     const quiz = quizRes.rows[0];
@@ -264,8 +306,7 @@ router.get("/quizzes/:id", async (req, res) => {
 
     // ❌ Quiz not started yet
     if (now < start) {
-      return res.status(403).json({
-        message: "Quiz has not started yet",
+      return sendError(res, 403, "Quiz has not started yet");
         quiz: {
           id: quiz.id,
           name: quiz.name,
@@ -279,9 +320,7 @@ router.get("/quizzes/:id", async (req, res) => {
 
     // ❌ Quiz ended
     if (now > end) {
-      return res.status(410).json({
-        message: "Quiz has ended"
-      });
+      return sendError(res, 410, "Quiz has ended");
     }
 
     // If quiz is ongoing → return questions
@@ -300,21 +339,27 @@ router.get("/quizzes/:id", async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Server error" });
+    return sendError(res, 500, "Server error");
   }
 });
 
 
 // -------------------------------------------------------
-// SUBMIT QUIZ
+// SUBMIT QUIZ (authenticated users)
 // -------------------------------------------------------
-router.post("/quizzes/:quizId/submit", async (req, res) => {
+router.post(
+  "/quizzes/:quizId/submit",
+  verifyUser,
+  [
+    body("answers")
+      .isArray({ min: 1 })
+      .withMessage("Answers array is required"),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
   const { quizId } = req.params;
-  const { user_id, answers } = req.body; // [{ question_id, selected_option }]
-
-  if (!answers || !Array.isArray(answers)) {
-    return res.status(400).json({ message: "Answers array is required" });
-  }
+  const { answers } = req.body; // [{ question_id, selected_option }]
+  const userId = req.user.user_id;
 
   try {
     // Fetch quiz questions
@@ -339,15 +384,16 @@ router.post("/quizzes/:quizId/submit", async (req, res) => {
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (quiz_id, user_id)
        DO UPDATE SET score = $3, answered = $4, total_questions = $5`,
-      [quizId, user_id, score, answers.length, questions.length]
+      [quizId, userId, score, answers.length, questions.length]
     );
 
     res.json({ message: "Quiz submitted", score });
   } catch (err) {
     console.error("Submit quiz error:", err);
-    res.status(500).json({ message: "Error submitting quiz" });
+    return sendError(res, 500, "Error submitting quiz");
   }
-});
+}
+);
 
 // -------------------------------------------------------
 // GET QUIZ RESULTS
@@ -366,7 +412,7 @@ router.get("/quizzes/:quizId/results", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Fetch quiz results error:", err);
-    res.status(500).json({ message: "Error fetching quiz results" });
+    return sendError(res, 500, "Error fetching quiz results");
   }
 });
 
@@ -387,7 +433,7 @@ router.get("/quizzes/:quizId/leaderboard", async (req, res) => {
     res.json({ leaderboard: leaderboardRes.rows });
   } catch (err) {
     console.error("Leaderboard error:", err);
-    res.status(500).json({ message: "Error fetching leaderboard" });
+    return sendError(res, 500, "Error fetching leaderboard");
   }
 });
 

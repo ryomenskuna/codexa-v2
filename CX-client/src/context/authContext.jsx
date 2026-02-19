@@ -1,14 +1,13 @@
-import React, { createContext,useContext, useState } from "react";
+import React, { createContext, useContext, useState } from "react";
 
-// Create the context
+// AuthContext is responsible only for auth UI state (login/signup modal)
 const AuthContext = createContext(null);
 
-// AuthProvider wraps your app
 export const AuthProvider = ({ children }) => {
   const [authType, setAuthType] = useState("none"); // "none" | "login" | "signup"
-  const [user, setUser] = useState(null);
+
   return (
-    <AuthContext.Provider value={{ authType, setAuthType,user, setUser }}>
+    <AuthContext.Provider value={{ authType, setAuthType }}>
       {children}
     </AuthContext.Provider>
   );

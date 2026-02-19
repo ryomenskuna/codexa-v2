@@ -9,6 +9,7 @@ import authRoutes from "./routes/authRoutes.js";
 import teacherRoutes from "./routes/teacherRoutes.js";
 import eventRoutes from "./routes/eventRoutes.js";
 import quizRoutes from "./routes/quizRoutes.js";
+import { sendError } from "./utils/http.js";
 
 dotenv.config();
 
@@ -91,6 +92,15 @@ app.use("/events", eventRoutes);
 app.use("/quiz", quizRoutes);
 
 app.get("/", (req, res) => res.send("Codexa backend running ✅"));
+
+// Centralized error handler
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  // Avoid leaking internal details to clients
+  // You can add more structured logging here if needed
+  console.error("Unhandled error:", err);
+  return sendError(res, 500, "Server error");
+});
 
 app.listen(PORT, "::", () => {
   console.log(`Server running on all interfaces at port ${PORT}`);
